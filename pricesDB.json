@@ -1,12 +1,26 @@
 {
-  "08001": {
-    "municipio": "Barcelona",
-    "distrito": "Ciutat Vella",
-    "precio_m2": 3950
-  },
   "08720": {
     "municipio": "Vilafranca del Penedès",
-    "distrito": "Centro",
-    "precio_m2": 1950
+    "barrios": {
+      "La Girada": 2150,
+      "Centro": 1850,
+      "Poble Nou": 1900,
+      "L'Espirall": 1400,
+      "Sant Julià": 1650
+    }
+  },
+  "08001": {
+    "municipio": "Barcelona",
+    "barrios": {
+      "El Raval": 3200,
+      "Barri Gòtic": 4100
+    }
+  },
+  "08034": {
+    "municipio": "Barcelona",
+    "barrios": {
+      "Pedralbes": 7500,
+      "Sarrià": 6800
+    }
   }
 }
