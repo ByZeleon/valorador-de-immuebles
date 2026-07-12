@@ -1,0 +1,12 @@
+{
+  "08001": {
+    "municipio": "Barcelona",
+    "distrito": "Ciutat Vella",
+    "precio_m2": 3950
+  },
+  "08720": {
+    "municipio": "Vilafranca del Penedès",
+    "distrito": "Centro",
+    "precio_m2": 1950
+  }
+}
