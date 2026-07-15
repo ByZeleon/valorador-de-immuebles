@@ -130,11 +130,11 @@ def calcular_valoracion(datos: DatosCliente, background_tasks: BackgroundTasks):
     # B. Si el servidor nos devuelve un precio válido, hacemos los cálculos automáticos
     if precio_base_m2 is not None:
         # Aplicamos los factores correctores de conservación
-        factor_estado = 1.0
+        factor_estado = 0.85      # Penalización del -15%
         if datos.estado_conservacion == 'A':
-            factor_estado = 0.80  # Penalización del -20% por reforma
+            factor_estado = 0.65  # Penalización del -35% por reforma
         elif datos.estado_conservacion == 'C':
-            factor_estado = 1.15  # Plus del +15% por excelente/obra nueva
+            factor_estado = 1.00
 
         precio_m2_ajustado = precio_base_m2 * factor_estado
 

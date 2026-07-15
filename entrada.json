@@ -10,3 +10,18 @@
     "plazas_garaje": 1,
     "m2_trastero": 6
 }
+
+{
+    "nombre": "Maria Jose",
+    "telefono": "630559792",
+    "email": "mari.g.a.1978@hotmail.com",
+    "codigo_postal": "14270",
+    "municipio": "hinojosa del duque",
+    "metros_vivienda": 76,
+    "estado_conservacion": "C",
+    "m2_terraza": 0,
+    "plazas_garaje": 0,
+    "m2_trastero": 0
+}
+
+# uvicorn valorador:app --reload
