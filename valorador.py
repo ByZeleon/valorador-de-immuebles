@@ -1,138 +1,171 @@
+import os
 import requests
+import smtplib
+from email.message import EmailMessage
+from fastapi import FastAPI, BackgroundTasks, HTTPException
+from pydantic import BaseModel
+from dotenv import load_dotenv
 
-# Tu enlace a GitHub (asegúrate de que es main o master)
+# 1. CARGAMOS LAS VARIABLES DE ENTORNO OCULTAS (.env)
+load_dotenv()
+
+app = FastAPI(
+    title="API de Valoración Inmobiliaria",
+    description="Backend profesional para tasación de inmuebles en tiempo real.",
+    version="1.0.0"
+)
+
+# URL de tu GitHub público con la base de datos de barrios
 URL_DATOS = "https://raw.githubusercontent.com/ByZeleon/valorador-de-immuebles/main/pricesDB.json"
 
-def cargar_datos():
-    print("Conectando con la base de datos...")
+# 2. MOLDE DE LOS DATOS QUE LLEGARÁN DESDE EL FORMULARIO WEB
+class DatosCliente(BaseModel):
+    nombre: str
+    telefono: str
+    email: str
+    codigo_postal: str
+    barrio: str
+    metros_vivienda: float
+    estado_conservacion: str  # "A" (reformar), "B" (buen estado), "C" (excelente)
+    m2_terraza: float = 0.0   # Opcional, por defecto 0.0 si el cliente no lo pone
+    plazas_garaje: int = 0    # Opcional, por defecto 0
+    m2_trastero: float = 0.0  # Opcional, por defecto 0.0
+
+# 3. FUNCIÓN PARA DESCARGAR TU BASE DE DATOS DESDE GITHUB
+def cargar_datos_github():
     try:
         respuesta = requests.get(URL_DATOS)
         if respuesta.status_code == 200:
             return respuesta.json()
         return None
-    except:
+    except Exception as e:
+        print(f"❌ Error de conexión al descargar de GitHub: {e}")
         return None
 
-def realizar_tasacion():
-    db_precios = cargar_datos()
-    if not db_precios:
-        print("Error al conectar con GitHub. Saliendo del programa.")
+# 4. FUNCIÓN PARA ENVIAR EL CORREO ELECTRÓNICO (GMAIL SEGURO)
+def enviar_alerta_agente(datos: DatosCliente, precio_calculado: float):
+    # Leemos las credenciales que guardaste de forma segura en tu .env
+    REMITENTE = os.getenv("EMAIL_REMITENTE")
+    PASSWORD = os.getenv("EMAIL_PASSWORD")
+    DESTINATARIO = os.getenv("EMAIL_DESTINATARIO")
+
+    # Verificación de seguridad por si olvidaste configurar el archivo .env
+    if not REMITENTE or not PASSWORD or not DESTINATARIO:
+        print("⚠️ ERROR: No se han configurado correctamente las variables del archivo .env")
         return
 
-    print("\n" + "="*50)
-    print(" 🏡 VALORADOR INMOBILIARIO AVANZADO (Por Barrios)")
-    print("="*50)
-
-    ficha = {}
-
-    # --- 1. UBICACIÓN Y BARRIOS ---
-    cp = input("\n📍 1. Código Postal: ").strip()
+    traductor_estados = {
+        "A": "A reformar",
+        "B": "Buen estado",
+        "C": "Excelente / Obra nueva"
+    }
     
-    if cp in db_precios:
-        zona = db_precios[cp]
-        print(f"\n🗺️ Municipio detectado: {zona['municipio']}")
-        print("¿En qué barrio se encuentra el inmueble?")
-        
-        # Extraemos los barrios y mostramos el menú
-        nombres_barrios = list(zona["barrios"].keys())
-        for i, barrio in enumerate(nombres_barrios):
-            print(f"  {i + 1}. {barrio}")
-            
-        try:
-            opcion = int(input("\nElige el número del barrio: "))
-            barrio_elegido = nombres_barrios[opcion - 1]
-            precio_base_m2 = zona["barrios"][barrio_elegido]
-            
-            print(f"   -> Seleccionado: {barrio_elegido}. Precio base: {precio_base_m2} €/m²")
-            ficha["Ubicación"] = f"{zona['municipio']} - {barrio_elegido} (CP: {cp})"
-        except (ValueError, IndexError):
-            print("❌ Opción inválida. Debes introducir el número correcto.")
-            return
-    else:
-        print("❌ No tenemos datos para ese Código Postal en la base de datos.")
-        return
+    # Buscamos la descripción. Si por error llega algo que no es A, B o C, pondrá "No especificado"
+    estado_descriptivo = traductor_estados.get(datos.estado_conservacion.upper(), "No especificado")
 
-    # --- 2. METROS CUADRADOS ---
+    # Creamos la estructura de correo
+    mensaje = EmailMessage()
+    mensaje['Subject'] = f"🚨 Nueva valoración web: {datos.nombre} ({datos.barrio})"
+    mensaje['From'] = REMITENTE
+    mensaje['To'] = DESTINATARIO
+
+    cuerpo = f"""
+    ¡Hola equipo!
+    Se ha generado una nueva oportunidad de venta desde el tasador web.
+    
+    DATOS DE CONTACTO DEL INTERESADO:
+    ==================================================
+    • Nombre: {datos.nombre}
+    • Teléfono: {datos.telefono}
+    • Email: {datos.email}
+    
+    CARACTERÍSTICAS DEL INMUEBLE INTRODUCIDAS:
+    ==================================================
+    • Ubicación: CP {datos.codigo_postal} - Barrio: {datos.barrio}
+    • Metros Vivienda: {datos.metros_vivienda} m²
+    • Estado de Conservación: {estado_descriptivo}
+    • Terraza/Balcón: {datos.m2_terraza} m²
+    • Plazas de Garaje: {datos.plazas_garaje} plaza(s)
+    • Trastero: {datos.m2_trastero} m²
+    
+    --------------------------------------------------
+    🎯 VALORACIÓN ESTIMADA DE MERCADO: {precio_calculado:,.2f} €
+    --------------------------------------------------
+    """
+    mensaje.set_content(cuerpo)
+
     try:
-        metros_vivienda = float(input("\n📐 2. Metros cuadrados de la vivienda: "))
-        ficha["Metros Vivienda"] = f"{metros_vivienda} m²"
-    except ValueError:
-        print("❌ Error: Debes introducir un número.")
-        return
+        # Servidor SMTP seguro de Gmail (Puerto 587 con cifrado TLS obligatorio hoy en día)
+        with smtplib.SMTP('smtp.gmail.com', 587) as server:
+            server.starttls()  # Iniciamos conexión cifrada segura
+            server.login(REMITENTE, PASSWORD)
+            server.send_message(mensaje)
+        print("✅ ¡Email de alerta enviado con éxito al agente inmobiliario!")
+    except Exception as e:
+        print(f"❌ Error crítico al enviar el email por SMTP: {e}")
 
-    # --- 3. ESTADO DEL INMUEBLE (Factor Multiplicador) ---
-    print("\n🛠️ 3. Estado de conservación:")
-    print("   A - A reformar")
-    print("   B - Buen estado")
-    print("   C - Excelente / Obra nueva")
-    estado = input("   Elige (A/B/C): ").strip().upper()
+# 5. EL "CAMARERO" DE TU FORMULARIO (Endpoint de FastAPI)
+@app.post("/api/calcular-valoracion")
+def calcular_valoracion(datos: DatosCliente, background_tasks: BackgroundTasks):
     
+    # A. Descargamos los precios frescos de tu GitHub
+    db_precios = cargar_datos_github()
+    if not db_precios:
+        raise HTTPException(
+            status_code=500, 
+            detail="La base de datos de precios no está disponible en este momento."
+        )
+
+    cp = datos.codigo_postal.strip()
+    barrio = datos.barrio.strip()
+
+    # B. Validamos si el Código Postal existe en nuestro JSON
+    if cp not in db_precios:
+        raise HTTPException(
+            status_code=404, 
+            detail="Código Postal no disponible en la base de datos."
+        )
+    
+    barrios_disponibles = db_precios[cp]["barrios"]
+    
+    # C. Validamos si el barrio seleccionado existe dentro de ese CP
+    if barrio not in barrios_disponibles:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"El barrio '{barrio}' no está registrado para el CP {cp}."
+        )
+
+    # D. Traemos el precio base del metro cuadrado
+    precio_base_m2 = barrios_disponibles[barrio]
+
+    # E. Aplicamos los factores correctores de conservación
     factor_estado = 1.0
-    if estado == 'A':
-        factor_estado = 0.80
-        ficha["Estado"] = "A reformar"
-    elif estado == 'C':
-        factor_estado = 1.15
-        ficha["Estado"] = "Excelente"
-    else:
-        ficha["Estado"] = "Buen estado"
+    if datos.estado_conservacion == 'A':
+        factor_estado = 0.80  # Penalización del -20% por reforma
+    elif datos.estado_conservacion == 'C':
+        factor_estado = 1.15  # Plus del +15% por excelente/obra nueva
 
     precio_m2_ajustado = precio_base_m2 * factor_estado
 
-    # --- 4. EXTRAS (Terraza, Garaje, Trastero) ---
-    valor_terraza = 0
-    tiene_terraza = input("\n☀️ 4. ¿Tiene terraza o balcón? (S/N): ").strip().upper()
-    if tiene_terraza == 'S':
-        try:
-            m2_terraza = float(input("   ¿Cuántos metros cuadrados?: "))
-            valor_terraza = m2_terraza * (precio_m2_ajustado * 0.5)
-            ficha["Terraza"] = f"Sí, {m2_terraza} m²"
-        except ValueError: pass
-    else: ficha["Terraza"] = "No"
+    # F. Matemáticas de valoración detallada
+    valor_vivienda = datos.metros_vivienda * precio_m2_ajustado
+    valor_terraza = datos.m2_terraza * (precio_m2_ajustado * 0.5)      # Al 50% de valor real
+    valor_garaje = datos.plazas_garaje * (precio_m2_ajustado * 5)      # Equivalente a 5m² por plaza
+    valor_trastero = datos.m2_trastero * (precio_m2_ajustado * 0.5)    # Al 50% de valor real
 
-    valor_garaje = 0
-    tiene_garaje = input("\n🚗 5. ¿Tiene plaza de garaje? (S/N): ").strip().upper()
-    if tiene_garaje == 'S':
-        try:
-            plazas = int(input("   ¿Cuántas plazas?: "))
-            valor_garaje = plazas * (precio_m2_ajustado * 5)
-            ficha["Garaje"] = f"Sí, {plazas} plaza(s)"
-        except ValueError: pass
-    else: ficha["Garaje"] = "No"
+    precio_final = valor_vivienda + valor_terraza + valor_garaje + valor_trastero
 
-    valor_trastero = 0
-    tiene_trastero = input("\n📦 6. ¿Tiene trastero? (S/N): ").strip().upper()
-    if tiene_trastero == 'S':
-        try:
-            m2_trastero = float(input("   ¿Cuántos metros cuadrados?: "))
-            valor_trastero = m2_trastero * (precio_m2_ajustado * 0.5)
-            ficha["Trastero"] = f"Sí, {m2_trastero} m²"
-        except ValueError: pass
-    else: ficha["Trastero"] = "No"
+    # G. Mandamos el email al buzón en segundo plano (asíncrono) para no ralentizar la respuesta web
+    background_tasks.add_task(enviar_alerta_agente, datos, precio_final)
 
-    # --- MATEMÁTICAS FINALES ---
-    valor_base_vivienda = metros_vivienda * precio_m2_ajustado
-    valor_total = valor_base_vivienda + valor_terraza + valor_garaje + valor_trastero
-    
-    ficha["Precio Base Barrio"] = f"{precio_base_m2:,.2f} €/m²"
-    ficha["Valoración Final"] = f"{valor_total:,.2f} €"
-
-    # --- RESULTADOS ---
-    print("\n" + "*"*50)
-    print(f" 🎯 VALOR ESTIMADO TOTAL: {valor_total:,.2f} €")
-    print("*"*50)
-    
-    print("\n--- DESGLOSE DEL PRECIO ---")
-    print(f"Valor interior vivienda: {valor_base_vivienda:,.2f} €")
-    if valor_terraza > 0: print(f"Valor extra por terraza: +{valor_terraza:,.2f} €")
-    if valor_garaje > 0: print(f"Valor extra por garaje: +{valor_garaje:,.2f} €")
-    if valor_trastero > 0: print(f"Valor extra por trastero: +{valor_trastero:,.2f} €")
-
-    print("\n" + "-"*50)
-    print(" 📩 FICHA REGISTRADA PARA EL AGENTE INMOBILIARIO")
-    print("-" * 50)
-    for clave, valor in ficha.items():
-        print(f"{clave}: {valor}")
-
-if __name__ == "__main__":
-    realizar_tasacion()
+    # H. Devolvemos la respuesta formateada que el Frontend mostrará al usuario
+    return {
+        "status": "success",
+        "precio_estimado": round(precio_final, 2),
+        "desglose": {
+            "valor_vivienda": round(valor_vivienda, 2),
+            "valor_terraza": round(valor_terraza, 2),
+            "valor_garaje": round(valor_garaje, 2),
+            "valor_trastero": round(valor_trastero, 2)
+        }
+    }
